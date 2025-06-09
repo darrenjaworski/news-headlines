@@ -5,27 +5,20 @@ import fetch from 'node-fetch';
 import { XMLParser } from 'fast-xml-parser';
 
 export async function activate(context: vscode.ExtensionContext) { // Made activate async
-	vscode.window.showInformationMessage('NYTimes Headlines extension is activating!');
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "nytimes-headlines" is now active!');
-
-	let helloWorldDisposable = vscode.commands.registerCommand('nytimes-headlines.helloWorld', () => {
-		vscode.window.showInformationMessage('Hello World from NYTimes Headlines!');
-	});
-	context.subscriptions.push(helloWorldDisposable);
+	console.log('Congratulations, your extension "news-headlines" is now active!');
 
 	// --- Scrolling Text Status Bar Item ---
 	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-	statusBarItem.text = "Hello World";
-	statusBarItem.tooltip = "NYTimes Headlines";
+	let scrollableText: string = "Loading headlines..."; // Will hold the combined string of headlines
+	statusBarItem.text = scrollableText;
+	statusBarItem.tooltip = "news Headlines";
 	statusBarItem.show();
 	context.subscriptions.push(statusBarItem);
 
-	const RssFeedUrl = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml";
-	let headlines: string[] = ["Loading headlines..."]; // Default headline
-	let currentHeadlineIndex = 0;
+	const RssFeedUrl = "https://feeds.npr.org/1001/rss.xml";
 
 	// Function to fetch and parse RSS feed
 	async function fetchHeadlines() {
@@ -33,50 +26,36 @@ export async function activate(context: vscode.ExtensionContext) { // Made activ
 			const response = await fetch(RssFeedUrl);
 			if (!response.ok) {
 				console.error(`Error fetching RSS feed: ${response.statusText}`);
-				headlines = ["Error fetching headlines"];
-				statusBarItem.text = headlines[0];
+				scrollableText = "Error fetching headlines";
+				statusBarItem.text = scrollableText;
 				return;
 			}
 			const xmlText = await response.text();
 			const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 			const jsonObj = parser.parse(xmlText);
 
-			let processedHeadlines: string[] = [];
 			if (jsonObj.rss && jsonObj.rss.channel && jsonObj.rss.channel.item) {
 				const items = Array.isArray(jsonObj.rss.channel.item) ? jsonObj.rss.channel.item : [jsonObj.rss.channel.item];
 				const titles: string[] = items.map((item: any) => item.title).filter((title: string | undefined): title is string => title !== undefined);
 
 				if (titles.length > 0) {
-					for (let i = 0; i < titles.length; i++) {
-						processedHeadlines.push(titles[i]);
-						if (i < titles.length - 1) { // Add em dash if not the last headline
-							processedHeadlines.push("—");
-						}
-					}
+					scrollableText = titles.join(" — "); // Join with em dash and spaces
+				} else {
+					scrollableText = "No headlines found";
 				}
-			}
-
-			if (processedHeadlines.length > 0) {
-				headlines = processedHeadlines;
 			} else {
-				headlines = ["No headlines found"];
+				scrollableText = "No headlines found";
 			}
-			currentHeadlineIndex = 0; // Reset to the first headline
-			// Update status bar with the first headline immediately after fetching
-			if (headlines.length > 0) {
-				// Add padding for scrolling effect, will be handled by startScrolling
-				statusBarItem.text = headlines[currentHeadlineIndex];
-			}
+			statusBarItem.text = scrollableText; // Update status bar with the full text before scrolling starts
 		} catch (error) {
 			console.error("Failed to fetch or parse RSS feed:", error);
-			headlines = ["Error fetching headlines"];
-			statusBarItem.text = headlines[0];
+			scrollableText = "Error fetching headlines";
+			statusBarItem.text = scrollableText;
 		}
 	}
 
-	// const originalText = "Hello World                               "; // Add padding for smooth scrolling - Will be replaced by headlines
 	let scrollIndex = 0;
-	const scrollSpeed = 200 // ms
+	const scrollSpeed = 150 // ms - Increased from 200ms for slower scroll
 	let scrollIntervalId: NodeJS.Timeout | undefined = undefined;
 	let isCurrentlyScrolling = false;
 
@@ -95,12 +74,12 @@ export async function activate(context: vscode.ExtensionContext) { // Made activ
 			clearInterval(scrollIntervalId);
 		}
 		scrollIntervalId = setInterval(() => {
-			if (headlines.length === 0) {
-				statusBarItem.text = "No headlines";
-				return; // Don't scroll if no headlines
-			}
+			// if (headlines.length === 0) { // REMOVED check, scrollableText always has content
+			// 	statusBarItem.text = "No headlines";
+			// 	return; 
+			// }
 
-			let textToScroll = headlines[currentHeadlineIndex];
+			let textToScroll = scrollableText;
 			// Add padding if text is shorter than a certain length to ensure smooth scroll
 			const minLengthForScrolling = 40; // Adjust as needed
 			if (textToScroll.length < minLengthForScrolling) {
@@ -111,11 +90,10 @@ export async function activate(context: vscode.ExtensionContext) { // Made activ
 			statusBarItem.text = textToScroll.substring(start) + textToScroll.substring(0, start);
 			scrollIndex++;
 
-			// Move to the next headline when the current one has finished scrolling completely
+			// Loop the entire combined string
 			if (scrollIndex >= textToScroll.length) {
 				scrollIndex = 0;
-				currentHeadlineIndex = (currentHeadlineIndex + 1) % headlines.length;
-				// No need to set statusBarItem.text here, interval will do it on next tick with new headline
+				// currentHeadlineIndex = (currentHeadlineIndex + 1) % headlines.length; // REMOVED
 			}
 		}, scrollSpeed);
 		isCurrentlyScrolling = true;
@@ -132,7 +110,7 @@ export async function activate(context: vscode.ExtensionContext) { // Made activ
 	}
 
 	// --- Register Toggle Command ---
-	const toggleCommandId = 'nytimes-headlines.toggleScroll';
+	const toggleCommandId = 'news-headlines.toggleScroll';
 	let toggleScrollDisposable = vscode.commands.registerCommand(toggleCommandId, () => {
 		if (isCurrentlyScrolling) {
 			stopScrolling();

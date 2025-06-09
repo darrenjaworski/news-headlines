@@ -1,6 +1,6 @@
 {
-  "name": "nytimes-headlines",
-  "displayName": "nytimes-headlines",
+  "name": "news-headlines",
+  "displayName": "news-headlines",
   "description": "Show the latest NY Times headlines on your toolbar.",
   "version": "0.0.1",
   "engines": {
@@ -16,7 +16,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "nytimes-headlines.helloWorld",
+        "command": "news-headlines.helloWorld",
         "title": "Hello World"
       }
     ]

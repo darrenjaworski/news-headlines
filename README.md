@@ -1,6 +1,6 @@
-# nytimes-headlines README
+# news-headlines README
 
-This is the README for your extension "nytimes-headlines". After writing up a brief description, we recommend including the following sections.
+This is the README for your extension "news-headlines". After writing up a brief description, we recommend including the following sections.
 
 ## Features
 
