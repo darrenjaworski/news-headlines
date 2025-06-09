@@ -4,23 +4,27 @@ import * as vscode from 'vscode';
 import fetch from 'node-fetch';
 import { XMLParser } from 'fast-xml-parser';
 
-export async function activate(context: vscode.ExtensionContext) { // Made activate async
+let statusBarItem: vscode.StatusBarItem;
+let scrollInterval: NodeJS.Timeout | undefined;
+let refetchInterval: NodeJS.Timeout | undefined; // Added for periodic refetching
+let scrollIndex = 0;
+let scrollableText = ""; // Holds the full string of headlines
+let isCurrentlyScrolling = false; // Tracks scrolling state
+const scrollSpeed = 150; // ms 
+const FIVE_SECONDS_MS = 5 * 1000;
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
+export async function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "news-headlines" is now active!');
 
-	// --- Scrolling Text Status Bar Item ---
-	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-	let scrollableText: string = "Loading headlines..."; // Will hold the combined string of headlines
-	statusBarItem.text = scrollableText;
-	statusBarItem.tooltip = "news Headlines";
-	statusBarItem.show();
-	context.subscriptions.push(statusBarItem);
+	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	// toggleButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99); // Removed
+	// toggleButton.command = 'news-headlines.toggleScroll'; // Removed
+
+	context.subscriptions.push(statusBarItem); // Removed toggleButton from subscriptions
 
 	const RssFeedUrl = "https://feeds.npr.org/1001/rss.xml";
 
-	// Function to fetch and parse RSS feed
 	async function fetchHeadlines() {
 		try {
 			const response = await fetch(RssFeedUrl);
@@ -46,7 +50,8 @@ export async function activate(context: vscode.ExtensionContext) { // Made activ
 			} else {
 				scrollableText = "No headlines found";
 			}
-			statusBarItem.text = scrollableText; // Update status bar with the full text before scrolling starts
+			// Update statusBarItem.text directly here so if scrolling doesn't start (e.g. error), the message is shown.
+			statusBarItem.text = scrollableText;
 		} catch (error) {
 			console.error("Failed to fetch or parse RSS feed:", error);
 			scrollableText = "Error fetching headlines";
@@ -54,92 +59,110 @@ export async function activate(context: vscode.ExtensionContext) { // Made activ
 		}
 	}
 
-	let scrollIndex = 0;
-	const scrollSpeed = 150 // ms - Increased from 200ms for slower scroll
-	let scrollIntervalId: NodeJS.Timeout | undefined = undefined;
-	let isCurrentlyScrolling = false;
-
-	// --- Toggle Button Status Bar Item ---
-	const toggleButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99); // Priority 99 to appear to the right of item with 100
-	toggleButton.tooltip = "Pause/Resume Scrolling";
-	// The command will be assigned after it's registered.
-	// The text will be set by updateToggleButtonText().
-
-	function updateToggleButtonText() {
-		toggleButton.text = isCurrentlyScrolling ? "$(debug-pause)" : "$(play)";
-	}
+	// function updateToggleButtonText() { // Removed
+	// 	toggleButton.text = isCurrentlyScrolling ? `$(debug-pause)` : `$(play)`; // Removed
+	// 	toggleButton.tooltip = isCurrentlyScrolling ? "Pause Headlines" : "Resume Headlines"; // Removed
+	// } // Removed
 
 	function startScrolling() {
-		if (scrollIntervalId) { // Clear any existing interval before starting a new one
-			clearInterval(scrollIntervalId);
+		if (scrollInterval) {
+			clearInterval(scrollInterval);
 		}
-		scrollIntervalId = setInterval(() => {
-			// if (headlines.length === 0) { // REMOVED check, scrollableText always has content
-			// 	statusBarItem.text = "No headlines";
-			// 	return; 
-			// }
-
+		scrollIndex = 0; // Reset scroll index whenever scrolling starts with new/old text
+		scrollInterval = setInterval(() => {
 			let textToScroll = scrollableText;
-			// Add padding if text is shorter than a certain length to ensure smooth scroll
-			const minLengthForScrolling = 40; // Adjust as needed
-			if (textToScroll.length < minLengthForScrolling) {
+			const minLengthForScrolling = 40;
+			if (textToScroll.length > 0 && textToScroll.length < minLengthForScrolling) { // Check length > 0
 				textToScroll = textToScroll + ' '.repeat(minLengthForScrolling - textToScroll.length);
+			} else if (textToScroll.length === 0) { // Handle empty scrollableText
+				statusBarItem.text = ""; // Or some placeholder
+				return; // Don't try to scroll empty text
 			}
+
 
 			const start = scrollIndex % textToScroll.length;
 			statusBarItem.text = textToScroll.substring(start) + textToScroll.substring(0, start);
 			scrollIndex++;
 
-			// Loop the entire combined string
 			if (scrollIndex >= textToScroll.length) {
 				scrollIndex = 0;
-				// currentHeadlineIndex = (currentHeadlineIndex + 1) % headlines.length; // REMOVED
 			}
 		}, scrollSpeed);
 		isCurrentlyScrolling = true;
-		updateToggleButtonText();
+		// updateToggleButtonText(); // Removed
 	}
 
 	function stopScrolling() {
-		if (scrollIntervalId) {
-			clearInterval(scrollIntervalId);
-			scrollIntervalId = undefined;
+		if (scrollInterval) {
+			clearInterval(scrollInterval);
+			scrollInterval = undefined;
 		}
 		isCurrentlyScrolling = false;
-		updateToggleButtonText();
+		// updateToggleButtonText(); // Removed
+		// When scrolling stops, the status bar shows the last scrolled segment.
+		// If we want it to show the full static message, we'd set statusBarItem.text = scrollableText here.
+		// For now, leaving it as is.
 	}
 
-	// --- Register Toggle Command ---
-	const toggleCommandId = 'news-headlines.toggleScroll';
-	let toggleScrollDisposable = vscode.commands.registerCommand(toggleCommandId, () => {
-		if (isCurrentlyScrolling) {
-			stopScrolling();
+	async function fetchHeadlinesAndScroll() {
+		statusBarItem.text = "Fetching latest headlines..."; // Show fetching message
+		await fetchHeadlines(); // This sets scrollableText and statusBarItem.text (especially for errors)
+
+		if (scrollableText && scrollableText !== "Error fetching headlines" && scrollableText !== "No headlines found") {
+			startScrolling(); // This will use the new scrollableText
 		} else {
-			startScrolling();
+			// If fetchHeadlines resulted in an error or no headlines,
+			// statusBarItem.text is already set by fetchHeadlines.
+			// Ensure scrolling is stopped if it was somehow active for an error message.
+			if (isCurrentlyScrolling) {
+				stopScrolling();
+			}
+			// statusBarItem.text will display the error or "No headlines found" statically.
 		}
-	});
-	context.subscriptions.push(toggleScrollDisposable);
+	}
 
-	// --- Finalize Toggle Button Setup ---
-	toggleButton.command = toggleCommandId;
-	toggleButton.show();
-	context.subscriptions.push(toggleButton);
+	// Initial UI setup
+	statusBarItem.show();
+	// toggleButton.show(); // Removed
+	// updateToggleButtonText(); // Removed
 
-	// --- Initial State ---
-	await fetchHeadlines(); // Fetch headlines first
-	startScrolling(); // Start scrolling when the extension activates
+	// Phase 1: Scroll "Headlines brought to you by NPR" for 5 seconds
+	scrollableText = "Headlines brought to you by NPR";
+	statusBarItem.text = scrollableText; // Set text before starting scroll
+	startScrolling();
 
-	// Ensure the interval is cleared when the extension deactivates or the subscription is disposed
+	// Phase 2: After 5 seconds, fetch actual headlines and set up periodic refetch
+	const initialFetchTimeout = setTimeout(async () => {
+		stopScrolling(); // Stop the intro scroll
+		await fetchHeadlinesAndScroll(); // Fetch and scroll actual headlines
+
+		// Setup periodic refetching
+		if (refetchInterval) { clearInterval(refetchInterval); } // Clear if somehow already set
+		refetchInterval = setInterval(async () => {
+			if (isCurrentlyScrolling) { stopScrolling(); } // Stop current scroll before refetching
+			await fetchHeadlinesAndScroll(); // Fetch and scroll new headlines
+		}, FIFTEEN_MINUTES_MS);
+		context.subscriptions.push({ dispose: () => { if (refetchInterval) { clearInterval(refetchInterval); } } });
+
+	}, FIVE_SECONDS_MS);
+	context.subscriptions.push({ dispose: () => clearTimeout(initialFetchTimeout) });
+
+
+	// Ensure the main scrollInterval is cleared when the extension deactivates
+	// This is implicitly handled if scrollInterval is always cleared in stopScrolling()
+	// and stopScrolling() is called appropriately, or by adding its own disposable.
+	// Adding a specific disposable for scrollInterval for robustness:
 	context.subscriptions.push({
 		dispose: () => {
-			if (scrollIntervalId) {
-				clearInterval(scrollIntervalId);
+			if (scrollInterval) {
+				clearInterval(scrollInterval);
 			}
 		}
 	});
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {
-	// Any additional cleanup can go here if needed
+	// Intervals are cleared by their disposables being called by VS Code
+	// No explicit clearInterval needed here if they are correctly added to context.subscriptions
+	console.log("News headlines extension deactivated. Intervals should be cleared.");
 }
