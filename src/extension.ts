@@ -11,7 +11,7 @@ let scrollIndex = 0;
 let scrollableText = ""; // Holds the full string of headlines
 let isCurrentlyScrolling = false; // Tracks scrolling state
 const scrollSpeed = 150; // ms 
-const FIVE_SECONDS_MS = 5 * 1000;
+const TEN_SECONDS_MS = 10 * 1000;
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -144,7 +144,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}, FIFTEEN_MINUTES_MS);
 		context.subscriptions.push({ dispose: () => { if (refetchInterval) { clearInterval(refetchInterval); } } });
 
-	}, FIVE_SECONDS_MS);
+	}, TEN_SECONDS_MS);
 	context.subscriptions.push({ dispose: () => clearTimeout(initialFetchTimeout) });
 
 
