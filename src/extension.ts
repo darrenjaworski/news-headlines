@@ -14,20 +14,31 @@ const scrollSpeed = 150; // ms
 const TEN_SECONDS_MS = 10 * 1000;
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
+const TOPIC_MAP: { [key: string]: string } = {
+	"News": "1001",
+	"World": "1004",
+	"Business": "1006",
+	"Science": "1007",
+	"Culture": "1008"
+};
+
 export async function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "news-headlines" is now active!');
 
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-	// toggleButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99); // Removed
-	// toggleButton.command = 'news-headlines.toggleScroll'; // Removed
+	context.subscriptions.push(statusBarItem);
 
-	context.subscriptions.push(statusBarItem); // Removed toggleButton from subscriptions
-
-	const RssFeedUrl = "https://feeds.npr.org/1001/rss.xml";
+	function getRssFeedUrl(): string {
+		const config = vscode.workspace.getConfiguration('news-headlines');
+		const topicName = config.get<string>('feedTopic', 'News'); // Default to 'News'
+		const topicId = TOPIC_MAP[topicName] || TOPIC_MAP['News']; // Fallback to News if invalid
+		return `https://feeds.npr.org/${topicId}/rss.xml`;
+	}
 
 	async function fetchHeadlines() {
+		const currentRssFeedUrl = getRssFeedUrl();
 		try {
-			const response = await fetch(RssFeedUrl);
+			const response = await fetch(currentRssFeedUrl);
 			if (!response.ok) {
 				console.error(`Error fetching RSS feed: ${response.statusText}`);
 				scrollableText = "Error fetching headlines";
@@ -51,11 +62,18 @@ export async function activate(context: vscode.ExtensionContext) {
 				scrollableText = "No headlines found";
 			}
 			// Update statusBarItem.text directly here so if scrolling doesn't start (e.g. error), the message is shown.
-			statusBarItem.text = scrollableText;
+			// However, we want to preserve the intro message if this is the very first fetch.
+			if (statusBarItem.text !== "Headlines brought to you by NPR" && statusBarItem.text !== "Fetching latest headlines...") {
+				statusBarItem.text = scrollableText;
+			}
 		} catch (error) {
 			console.error("Failed to fetch or parse RSS feed:", error);
 			scrollableText = "Error fetching headlines";
 			statusBarItem.text = scrollableText;
+			// Similar to above, preserve intro/fetching message.
+			if (statusBarItem.text !== "Headlines brought to you by NPR" && statusBarItem.text !== "Fetching latest headlines...") {
+				statusBarItem.text = scrollableText;
+			}
 		}
 	}
 
@@ -146,6 +164,33 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	}, TEN_SECONDS_MS);
 	context.subscriptions.push({ dispose: () => clearTimeout(initialFetchTimeout) });
+
+	// Listen for configuration changes
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async e => {
+		if (e.affectsConfiguration('news-headlines.feedTopic')) {
+			console.log('News feed topic changed. Refetching headlines...');
+			if (isCurrentlyScrolling) {
+				stopScrolling();
+			}
+			// Clear existing refetch interval and restart the fetch process
+			if (refetchInterval) {
+				clearInterval(refetchInterval);
+			}
+			// Also clear the initial fetch timeout if it hasn't fired yet, though less likely
+			clearTimeout(initialFetchTimeout);
+
+			// Immediately fetch and scroll with the new topic, then reset the 15-min interval
+			await fetchHeadlinesAndScroll();
+
+			refetchInterval = setInterval(async () => {
+				if (isCurrentlyScrolling) { stopScrolling(); }
+				await fetchHeadlinesAndScroll();
+			}, FIFTEEN_MINUTES_MS);
+			// The disposable for refetchInterval is already pushed, but we are creating a new interval ID.
+			// It's generally safer to push a new disposable for the new interval, though the old one would clear the new one if not careful.
+			// For simplicity here, we rely on the existing disposable to clear the *latest* refetchInterval ID.
+		}
+	}));
 
 
 	// Ensure the main scrollInterval is cleared when the extension deactivates

@@ -16,10 +16,27 @@
   "contributes": {
     "commands": [
       {
-        "command": "news-headlines.helloWorld",
-        "title": "Hello World"
+        "command": "news-headlines.toggleScroll",
+        "title": "Toggle News Headlines Scroll"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "News Headlines",
+      "properties": {
+        "news-headlines.feedTopic": {
+          "type": "string",
+          "default": "News",
+          "enum": [
+            "News",
+            "World",
+            "Business",
+            "Science",
+            "Culture"
+          ],
+          "description": "Select the news topic to display in the status bar. (News: 1001, World: 1004, Business: 1006, Science: 1007, Culture: 1008)"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
